@@ -7,7 +7,7 @@ from machine import Pin       # Define pin
 import utime as time
 from dht import DHT11
 import wifi
-from machine import I2C, Pin
+from machine import I2C, Pin, ADC
 from pico_i2c_lcd import I2cLcd
 
 
@@ -17,6 +17,7 @@ i2c = I2C(0, sda=Pin(8), scl=Pin(9), freq=400000)
 #INTERVAL = minutes * 60  # 300 seconds = 5 minutes
 INTERVAL = 10
 led = Pin("LED", Pin.OUT)   # led pin initialization for Raspberry Pi Pico W
+soil_adc_pin1 = ADC(Pin(26))
 
 # Adafruit IO (AIO) configuration
 AIO_SERVER = "io.adafruit.com"
@@ -67,6 +68,21 @@ def get_temperature():
         print("Publishing: {0} to {1} ... ".format(publish_message, AIO_MESSAGE_FEED), end='')
         
         pub_sub(temp, humid, publish_message)
+        
+# this function is called when auto wattering is ON
+def do_auto_wattering():
+    adc1 = soil_adc_pin1.read_u16()
+    moisture_perc1 = rsd.get_soil_moisture_percentage(adc1, fully_dry, fully_wet)
+    if moisture_perc1 <= 15:
+        relay_pump_pin = Pin(15, Pin.OUT)
+        print("WATER PUMP IS ON!")
+        time.sleep(3)
+        relay_pump_pin.init(Pin.IN)
+        print("WATER PUMP IS OFF!")
+        time.sleep(3)
+    else:
+        print("Soil moisture is above 10%, no need to water the plant!", moisture_perc1, adc1)
+        time.sleep(3)
     
 # Method to publish and subscribe to messages
 def pub_sub(temp, humid, publish_message):
