@@ -9,6 +9,7 @@ from dht import DHT11
 import wifi
 from machine import I2C, Pin, ADC
 from pico_i2c_lcd import I2cLcd
+import readsensordata as rsd
 
 
 # BEGIN SETTINGS
@@ -30,7 +31,11 @@ AIO_TEMP_FEED = "Paty_Marklund/feeds/temperature"
 AIO_HUMID_FEED = "Paty_Marklund/feeds/humidity"
 AIO_MESSAGE_FEED = "Paty_Marklund/feeds/message"
 AIO_HELLO_FEED = "Paty_Marklund/feeds/hello"
+AIO_PUMP_STATUS_FEED = "Paty_Marklund/feeds/pump_status"
+AIO_START_PUMP_FEED = "Paty_Marklund/feeds/start_pump"
 
+fully_dry = 44490  # 0% wet
+fully_wet = 16500  # 100% wet
 
 # FUNCTIONS
 
@@ -51,9 +56,10 @@ def get_temperature():
         try:
             temp = sensor.temperature
             time.sleep(2)
-            humid = sensor.humidity
+            humid = sensor.humidity 
+            auto_wattering()
         except:
-            print("An exception occurred")  
+            print("An exception occurred")
             continue  
         
         if (prev_humid is None or prev_temp is None) or (temp != prev_temp and humid != prev_humid):
@@ -70,7 +76,7 @@ def get_temperature():
         pub_sub(temp, humid, publish_message)
         
 # this function is called when auto wattering is ON
-def do_auto_wattering():
+def auto_wattering():
     adc1 = soil_adc_pin1.read_u16()
     moisture_perc1 = rsd.get_soil_moisture_percentage(adc1, fully_dry, fully_wet)
     if moisture_perc1 <= 15:
@@ -90,6 +96,7 @@ def pub_sub(temp, humid, publish_message):
         client.publish(topic=AIO_TEMP_FEED, msg=str(temp))
         client.publish(topic=AIO_HUMID_FEED, msg=str(humid))
         client.publish(topic=AIO_MESSAGE_FEED, msg=str(publish_message))
+        client.publish(topic=AIO_PUMP_STATUS_FEED, msg=int(1))
         client.subscribe(AIO_HELLO_FEED)
         print("DONE")
     except Exception as e:
