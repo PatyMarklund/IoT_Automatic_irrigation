@@ -24,7 +24,7 @@ soil_adc_pin1 = ADC(Pin(26))
 AIO_SERVER = "io.adafruit.com"
 AIO_PORT = 1883
 AIO_USER = "Paty_Marklund"
-AIO_KEY = "aio_wJnh06AczerjJNM4vxgB03tEFY3z"
+AIO_KEY = "" 
 AIO_CLIENT_ID = ubinascii.hexlify(machine.unique_id()) 
 AIO_LIGHTS_FEED = "Paty_Marklund/feeds/lights"
 AIO_TEMP_FEED = "Paty_Marklund/feeds/temperature"
@@ -48,16 +48,18 @@ def sub_cb(topic, msg):          # sub_cb means "callback subroutine"
 
 # Method to get the temperature from the sensor and publish
 def get_temperature():
-    sensor = DHT11(machine.Pin(28))
+    sensor = DHT11(machine.Pin(27))
     prev_temp = None
     prev_humid = None    
     
     while True:
         try:
             temp = sensor.temperature
+            print("Temp", temp)
             time.sleep(2)
             humid = sensor.humidity 
-            auto_wattering()
+            print("Temp", humid)
+            #auto_wattering()
         except:
             print("An exception occurred")
             continue  
@@ -65,24 +67,24 @@ def get_temperature():
         if (prev_humid is None or prev_temp is None) or (temp != prev_temp and humid != prev_humid):
             prev_temp = temp
             prev_humid = humid
-            message_1, message_2 = weather_report(temp, humid)
-            publish_message = message_1 + " / " + message_2
-            display_message(message_1, message_2)
+            #message_1, message_2 = weather_report(temp, humid)
+            #publish_message = message_1 + " / " + message_2
+            #display_message(message_1, message_2)
             
         print("Publishing: {0} to {1} ... ".format(temp, AIO_TEMP_FEED), end='')
         print("Publishing: {0} to {1} ... ".format(humid, AIO_HUMID_FEED), end='')
-        print("Publishing: {0} to {1} ... ".format(publish_message, AIO_MESSAGE_FEED), end='')
+        #print("Publishing: {0} to {1} ... ".format(publish_message, AIO_MESSAGE_FEED), end='')
         
-        pub_sub(temp, humid, publish_message)
+        pub_sub(temp, humid) #, publish_message)
         
 # this function is called when auto wattering is ON
 def auto_wattering():
     adc1 = soil_adc_pin1.read_u16()
     moisture_perc1 = rsd.get_soil_moisture_percentage(adc1, fully_dry, fully_wet)
-    if moisture_perc1 <= 15:
+    if moisture_perc1 >= 15:
         relay_pump_pin = Pin(15, Pin.OUT)
         print("WATER PUMP IS ON!")
-        time.sleep(3)
+        time.sleep(30)
         relay_pump_pin.init(Pin.IN)
         print("WATER PUMP IS OFF!")
         time.sleep(3)
@@ -91,13 +93,17 @@ def auto_wattering():
         time.sleep(3)
     
 # Method to publish and subscribe to messages
-def pub_sub(temp, humid, publish_message):
+def pub_sub(temp, humid): #, publish_message):
     try:
         client.publish(topic=AIO_TEMP_FEED, msg=str(temp))
         client.publish(topic=AIO_HUMID_FEED, msg=str(humid))
-        client.publish(topic=AIO_MESSAGE_FEED, msg=str(publish_message))
-        client.publish(topic=AIO_PUMP_STATUS_FEED, msg=int(1))
+        #client.publish(topic=AIO_MESSAGE_FEED, msg=str(publish_message))
+        #client.publish(topic=AIO_PUMP_STATUS_FEED, msg=int(1))
         client.subscribe(AIO_HELLO_FEED)
+        if client.subscribe(AIO_START_PUMP_FEED):
+            auto_wattering()
+        else:
+            0
         print("DONE")
     except Exception as e:
         print("FAILED")
