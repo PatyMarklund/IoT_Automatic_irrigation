@@ -19,6 +19,9 @@ i2c = I2C(0, sda=Pin(8), scl=Pin(9), freq=400000)
 INTERVAL = 10
 led = Pin("LED", Pin.OUT)   # led pin initialization for Raspberry Pi Pico W
 soil_adc_pin1 = ADC(Pin(26))
+relay = Pin(15, Pin.OUT)
+led = machine.Pin("LED", machine.Pin.OUT)
+sensor = DHT11(machine.Pin(27))
 
 # Adafruit IO (AIO) configuration
 AIO_SERVER = "io.adafruit.com"
@@ -41,17 +44,26 @@ fully_wet = 16500  # 100% wet
 
 # Callback Function to respond to messages from Adafruit IO
 def sub_cb(topic, msg):          # sub_cb means "callback subroutine"    
-    received = msg.decode()
-    print((topic, received))              # Outputs the message that was received. Debugging use.
-    message_1 = "Hello!"
-    display_message(message_1, received)
+    print((topic, msg))
+    if msg.decode() == "ON":
+        led.value(1)
+        #moisture_monitor()
+        relay.value(0)
+        time.sleep(10)
+        relay.value(1)
+        time.sleep(3)
+    else:
+        led.value(0)
+        print("No command received")
+    #received = msg.decode()
+    #print((topic, received))              # Outputs the message that was received. Debugging use.
+    #message_1 = "Hello!"
+    #display_message(message_1, received)
 
 # Method to get the temperature from the sensor and publish
 def get_temperature():
-    sensor = DHT11(machine.Pin(27))
     prev_temp = None
     prev_humid = None    
-    
     while True:
         try:
             temp = sensor.temperature
@@ -59,6 +71,7 @@ def get_temperature():
             time.sleep(2)
             humid = sensor.humidity 
             print("Temp", humid)
+            moisture_monitor()
             #auto_wattering()
         except:
             print("An exception occurred")
@@ -77,15 +90,30 @@ def get_temperature():
         
         pub_sub(temp, humid) #, publish_message)
         
+def moisture_monitor():
+    adc1 = soil_adc_pin1.read_u16()
+    moisture_perc1 = rsd.get_soil_moisture_percentage(adc1, fully_dry, fully_wet)
+    if moisture_perc1 >= 15:
+        relay.value(0)
+        print("WATER PUMP IS ON!")
+        time.sleep(3)
+    else:
+        relay.value(1)
+        print("WATER PUMP IS OFF!")
+        print("Soil moisture is above 10%, no need to water the plant!", moisture_perc1, adc1)
+        time.sleep(3)   
+
 # this function is called when auto wattering is ON
 def auto_wattering():
     adc1 = soil_adc_pin1.read_u16()
     moisture_perc1 = rsd.get_soil_moisture_percentage(adc1, fully_dry, fully_wet)
     if moisture_perc1 >= 15:
-        relay_pump_pin = Pin(15, Pin.OUT)
+        #relay_pump_pin = Pin(15, Pin.OUT)
+        relay.value(0)
         print("WATER PUMP IS ON!")
         time.sleep(30)
-        relay_pump_pin.init(Pin.IN)
+        #relay_pump_pin.init(Pin.IN)
+        relay.value(1)
         print("WATER PUMP IS OFF!")
         time.sleep(3)
     else:
@@ -99,11 +127,8 @@ def pub_sub(temp, humid): #, publish_message):
         client.publish(topic=AIO_HUMID_FEED, msg=str(humid))
         #client.publish(topic=AIO_MESSAGE_FEED, msg=str(publish_message))
         #client.publish(topic=AIO_PUMP_STATUS_FEED, msg=int(1))
-        client.subscribe(AIO_HELLO_FEED)
-        if client.subscribe(AIO_START_PUMP_FEED):
-            auto_wattering()
-        else:
-            0
+        #client.subscribe(AIO_HELLO_FEED)
+        #client.subscribe(AIO_START_PUMP_FEED)
         print("DONE")
     except Exception as e:
         print("FAILED")
@@ -163,9 +188,10 @@ client = MQTTClient(AIO_CLIENT_ID, AIO_SERVER, AIO_PORT, AIO_USER, AIO_KEY)
 
 # Subscribed messages will be delivered to this callback
 client.set_callback(sub_cb)
+client.subscribe(AIO_START_PUMP_FEED)
 client.connect()
-client.subscribe(AIO_HELLO_FEED)
-print("Connected to %s, subscribed to %s topic" % (AIO_SERVER, AIO_HELLO_FEED))
+#client.subscribe(AIO_HELLO_FEED)
+print("Connected to %s, subscribed to %s topic" % (AIO_SERVER, AIO_HELLO_FEED, AIO_START_PUMP_FEED))
 
 try:                      
     while 1:              
