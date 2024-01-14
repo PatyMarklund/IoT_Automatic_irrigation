@@ -22,12 +22,13 @@ soil_adc_pin1 = ADC(Pin(26))
 relay = Pin(15, Pin.OUT)
 led = machine.Pin("LED", machine.Pin.OUT)
 sensor = DHT11(machine.Pin(27))
+pump_status = False
 
 # Adafruit IO (AIO) configuration
 AIO_SERVER = "io.adafruit.com"
 AIO_PORT = 1883
 AIO_USER = "Paty_Marklund"
-AIO_KEY = "" 
+AIO_KEY = "aio_JflP94GQlr4O52IExz8hexBis7gb" 
 AIO_CLIENT_ID = ubinascii.hexlify(machine.unique_id()) 
 AIO_LIGHTS_FEED = "Paty_Marklund/feeds/lights"
 AIO_TEMP_FEED = "Paty_Marklund/feeds/temperature"
@@ -36,6 +37,7 @@ AIO_MESSAGE_FEED = "Paty_Marklund/feeds/message"
 AIO_HELLO_FEED = "Paty_Marklund/feeds/hello"
 AIO_PUMP_STATUS_FEED = "Paty_Marklund/feeds/pump_status"
 AIO_START_PUMP_FEED = "Paty_Marklund/feeds/start_pump"
+AIO_MOISTURE_FEED = "Paty_Marklund/feeds/moisture"
 
 fully_dry = 44490  # 0% wet
 fully_wet = 16500  # 100% wet
@@ -47,12 +49,11 @@ def sub_cb(topic, msg):          # sub_cb means "callback subroutine"
     print((topic, msg))
     if msg.decode() == "ON":
         led.value(1)
-        #moisture_monitor()
         relay.value(0)
-        time.sleep(10)
-        relay.value(1)
         time.sleep(3)
     else:
+        relay.value(1)
+        time.sleep(3)
         led.value(0)
         print("No command received")
     #received = msg.decode()
@@ -71,11 +72,10 @@ def get_temperature():
             time.sleep(2)
             humid = sensor.humidity 
             print("Temp", humid)
-            moisture_monitor()
-            #auto_wattering()
+            moisture, pump_status = moisture_monitor()
         except:
             print("An exception occurred")
-            continue  
+            #continue  
         
         if (prev_humid is None or prev_temp is None) or (temp != prev_temp and humid != prev_humid):
             prev_temp = temp
@@ -86,49 +86,40 @@ def get_temperature():
             
         print("Publishing: {0} to {1} ... ".format(temp, AIO_TEMP_FEED), end='')
         print("Publishing: {0} to {1} ... ".format(humid, AIO_HUMID_FEED), end='')
+        print("Publishing: {0} to {1} ... ".format(moisture, AIO_MOISTURE_FEED), end='')
+        print("Publishing: {0} to {1} ... ".format(pump_status, AIO_PUMP_STATUS_FEED), end='')
         #print("Publishing: {0} to {1} ... ".format(publish_message, AIO_MESSAGE_FEED), end='')
         
-        pub_sub(temp, humid) #, publish_message)
+        pub_sub(temp, humid, moisture, pump_status) #, publish_message)
         
 def moisture_monitor():
     adc1 = soil_adc_pin1.read_u16()
     moisture_perc1 = rsd.get_soil_moisture_percentage(adc1, fully_dry, fully_wet)
-    if moisture_perc1 >= 15:
+    if moisture_perc1 <= 15:
         relay.value(0)
         print("WATER PUMP IS ON!")
+        pump_status = True
         time.sleep(3)
     else:
         relay.value(1)
         print("WATER PUMP IS OFF!")
+        pump_status = False
         print("Soil moisture is above 10%, no need to water the plant!", moisture_perc1, adc1)
         time.sleep(3)   
-
-# this function is called when auto wattering is ON
-def auto_wattering():
-    adc1 = soil_adc_pin1.read_u16()
-    moisture_perc1 = rsd.get_soil_moisture_percentage(adc1, fully_dry, fully_wet)
-    if moisture_perc1 >= 15:
-        #relay_pump_pin = Pin(15, Pin.OUT)
-        relay.value(0)
-        print("WATER PUMP IS ON!")
-        time.sleep(30)
-        #relay_pump_pin.init(Pin.IN)
-        relay.value(1)
-        print("WATER PUMP IS OFF!")
-        time.sleep(3)
-    else:
-        print("Soil moisture is above 10%, no need to water the plant!", moisture_perc1, adc1)
-        time.sleep(3)
+        
+    return moisture_perc1, pump_status
     
 # Method to publish and subscribe to messages
-def pub_sub(temp, humid): #, publish_message):
+def pub_sub(temp, humid, moisture, pump_status): #, publish_message):
     try:
+        client.check_msg()
         client.publish(topic=AIO_TEMP_FEED, msg=str(temp))
         client.publish(topic=AIO_HUMID_FEED, msg=str(humid))
+        client.publish(topic=AIO_MOISTURE_FEED, msg=str(moisture))
+        client.publish(topic=AIO_PUMP_STATUS_FEED, msg=str(pump_status))
         #client.publish(topic=AIO_MESSAGE_FEED, msg=str(publish_message))
         #client.publish(topic=AIO_PUMP_STATUS_FEED, msg=int(1))
         #client.subscribe(AIO_HELLO_FEED)
-        #client.subscribe(AIO_START_PUMP_FEED)
         print("DONE")
     except Exception as e:
         print("FAILED")
@@ -182,16 +173,17 @@ try:
     ip = wifi.do_connect()
 except KeyboardInterrupt:
     print("Keyboard interrupt")
+    machine.reset()
 
 # Use the MQTT protocol to connect to Adafruit IO
 client = MQTTClient(AIO_CLIENT_ID, AIO_SERVER, AIO_PORT, AIO_USER, AIO_KEY)
 
 # Subscribed messages will be delivered to this callback
 client.set_callback(sub_cb)
-client.subscribe(AIO_START_PUMP_FEED)
 client.connect()
 #client.subscribe(AIO_HELLO_FEED)
-print("Connected to %s, subscribed to %s topic" % (AIO_SERVER, AIO_HELLO_FEED, AIO_START_PUMP_FEED))
+client.subscribe(AIO_START_PUMP_FEED)
+print("Connected to %s, subscribed to %s topic" % (AIO_SERVER, AIO_START_PUMP_FEED))
 
 try:                      
     while 1:              
@@ -202,3 +194,8 @@ finally:                  # If an exception is thrown ...
     client = None
     print("Disconnected from Adafruit IO.")
     
+    
+# TO DO LIST:
+# - Calculate properly the percentage of the moisture sensor value
+# - Publish the pump status when the pump is started from a subscription
+# - Check if the pump is on before starting in the subscription method  
